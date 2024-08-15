@@ -1,0 +1,328 @@
+#include "shape.hpp"
+#include "vertex.hpp"
+
+#include <tiny_gltf.h>
+#include <bstream.h>
+#include <tri_stripper.h>
+#include <glm/ext.hpp>
+#include <glm/geometric.hpp>
+
+#include <algorithm>
+
+const std::vector<std::string> VERTEX_ATTRIBUTE_NAMES = {
+    "POSITION",
+    "NORMAL",
+    "TANGENT",
+    "COLOR_0",
+    "COLOR_1",
+    "TEXCOORD_0",
+    "TEXCOORD_1",
+    "TEXCOORD_2",
+    "TEXCOORD_3",
+    "TEXCOORD_4",
+    "TEXCOORD_5",
+    "TEXCOORD_6",
+    "TEXCOORD_7",
+};
+
+/* SPrimitive */
+
+SPrimitive::~SPrimitive() {
+    mVertices.clear();
+}
+
+/* CShape */
+
+CShape::CShape() {
+
+}
+
+CShape::~CShape() {
+    mPrimitives.clear();
+}
+
+void CShape::CalculateBoundingVolume(const std::vector<glm::vec4>& positions) {
+    for (const glm::vec4& p : positions) {
+        if (p.x > mBounds.BoundingBoxMax.x) {
+            mBounds.BoundingBoxMax.x = p.x;
+        }
+        if (p.x < mBounds.BoundingBoxMin.x) {
+            mBounds.BoundingBoxMin.x = p.x;
+        }
+
+        if (p.y > mBounds.BoundingBoxMax.y) {
+            mBounds.BoundingBoxMax.y = p.y;
+        }
+        if (p.y < mBounds.BoundingBoxMin.y) {
+            mBounds.BoundingBoxMin.y = p.y;
+        }
+
+        if (p.z > mBounds.BoundingBoxMax.z) {
+            mBounds.BoundingBoxMax.z = p.z;
+        }
+        if (p.z < mBounds.BoundingBoxMin.z) {
+            mBounds.BoundingBoxMin.z = p.z;
+        }
+    }
+}
+
+/* UConverterShapeData */
+
+CShapeData::CShapeData() {
+
+}
+
+CShapeData::~CShapeData() {
+
+}
+
+EGXAttribute GetVertexAttributeFromType(const std::string& type) {
+    if (type == "POSITION") {
+        return EGXAttribute::Position;
+    }
+    else if (type == "NORMAL") {
+        return EGXAttribute::Normal;
+    }
+    else if (type == "TANGENT") {
+        return EGXAttribute::NBT;
+    }
+    else if (type == "COLOR_0") {
+        return EGXAttribute::Color0;
+    }
+    else if (type == "COLOR_1") {
+        return EGXAttribute::Color1;
+    }
+    else if (type == "TEXCOORD_0") {
+        return EGXAttribute::TexCoord0;
+    }
+    else if (type == "TEXCOORD_1") {
+        return EGXAttribute::TexCoord1;
+    }
+    else if (type == "TEXCOORD_2") {
+        return EGXAttribute::TexCoord2;
+    }
+    else if (type == "TEXCOORD_3") {
+        return EGXAttribute::TexCoord3;
+    }
+    else if (type == "TEXCOORD_4") {
+        return EGXAttribute::TexCoord4;
+    }
+    else if (type == "TEXCOORD_5") {
+        return EGXAttribute::TexCoord5;
+    }
+    else if (type == "TEXCOORD_6") {
+        return EGXAttribute::TexCoord6;
+    }
+    else if (type == "TEXCOORD_7") {
+        return EGXAttribute::TexCoord7;
+    }
+
+    return EGXAttribute::Null;
+}
+
+void CShapeData::ReadGltfVertexAttribute(
+    const tinygltf::Model* model,
+    std::vector<bStream::CMemoryStream>& buffers,
+    uint32_t attributeAccessorIndex,
+    std::vector<glm::vec4>& values
+) {
+    const auto& accessor = model->accessors[attributeAccessorIndex];
+    const auto& view = model->bufferViews[accessor.bufferView];
+
+    int32_t numComponents = tinygltf::GetNumComponentsInType(accessor.type);
+    if (numComponents == -1) {
+        return;
+    }
+
+    auto& attributeStream = buffers[view.buffer];
+    attributeStream.seek(view.byteOffset);
+
+    for (uint32_t i = 0; i < accessor.count; i++) {
+        glm::vec4 value = glm::zero<glm::vec4>();
+
+        for (uint32_t j = 0; j < numComponents; j++) {
+            float compValue = 0;
+
+            switch (accessor.componentType) {
+            case TINYGLTF_COMPONENT_TYPE_BYTE:
+                compValue = static_cast<float>(attributeStream.readInt8());
+                break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+                compValue = static_cast<float>(attributeStream.readUInt8());
+                break;
+            case TINYGLTF_COMPONENT_TYPE_SHORT:
+                compValue = static_cast<float>(attributeStream.readInt16());
+                break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+                compValue = static_cast<float>(attributeStream.readUInt16());
+                break;
+            case TINYGLTF_COMPONENT_TYPE_INT:
+                compValue = static_cast<float>(attributeStream.readInt32());
+                break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+                compValue = static_cast<float>(attributeStream.readUInt32());
+                break;
+            case TINYGLTF_COMPONENT_TYPE_FLOAT:
+                compValue = static_cast<float>(attributeStream.readFloat());
+                break;
+            default:
+                break;
+            }
+
+            value[j] = compValue;
+        }
+
+        values.push_back(value);
+    }
+}
+
+void CShapeData::ReadGltfIndices(
+    const tinygltf::Model* model,
+    std::vector<bStream::CMemoryStream>& buffers,
+    uint32_t indexAccessorIndex,
+    std::vector<uint16_t>& indices
+) {
+    const auto& indicesAccessor = model->accessors[indexAccessorIndex];
+    const auto& indicesView = model->bufferViews[indicesAccessor.bufferView];
+
+    auto& indicesStream = buffers[indicesView.buffer];
+    indicesStream.seek(indicesView.byteOffset);
+
+    for (uint32_t i = 0; i < indicesAccessor.count; i++) {
+        uint16_t index = UINT32_MAX;
+
+        switch (indicesAccessor.componentType) {
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+            index = static_cast<uint16_t>(indicesStream.readUInt8());
+            break;
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+            index = static_cast<uint16_t>(indicesStream.readUInt16());
+            break;
+        case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+            index = static_cast<uint16_t>(indicesStream.readUInt32());
+            break;
+        default:
+            break;
+        }
+
+        indices.push_back(index);
+    }
+}
+
+void CShapeData::BuildVertexData(tinygltf::Model* model, CVertexData& vertexData, std::vector<bStream::CMemoryStream>& buffers) {
+    for (const tinygltf::Mesh& mesh : model->meshes) {
+        for (const tinygltf::Primitive& prim : mesh.primitives) {
+            std::shared_ptr<CShape> shape = std::make_shared<CShape>();
+
+            shape->SetIndex(static_cast<uint32_t>(mShapes.size()));
+            shape->SetMaterialIndex(prim.material);
+            shape->SetMaterialName(model->materials[prim.material].name);
+
+            // Read vertex indices
+            std::vector<uint16_t> rawIndices;
+            ReadGltfIndices(model, buffers, prim.indices, rawIndices);
+
+            // Read vertex attributes
+            std::map<EGXAttribute, std::vector<glm::vec4>> primitiveAttributes;
+            std::vector<glm::vec4> jointIndices;
+            std::vector<glm::vec4> weights;
+
+            for (const auto& [name, index] : prim.attributes) {
+                // Vertex attributes
+                if (std::find(VERTEX_ATTRIBUTE_NAMES.begin(), VERTEX_ATTRIBUTE_NAMES.end(), name) != VERTEX_ATTRIBUTE_NAMES.end()) {
+                    EGXAttribute attribute = GetVertexAttributeFromType(name);
+                    if (attribute == EGXAttribute::Null) {
+                        continue;
+                    }
+
+                    ReadGltfVertexAttribute(model, buffers, prim.attributes.at(name), primitiveAttributes[attribute]);
+                }
+                // Joint indices for skinning
+                else if (name == "JOINTS_0") {
+                    ReadGltfVertexAttribute(model, buffers, prim.attributes.at(name), jointIndices);
+                }
+                // Weights for skinning
+                else if (name == "WEIGHTS_0") {
+                    ReadGltfVertexAttribute(model, buffers, prim.attributes.at(name), weights);
+                }
+                else {
+                    std::cout << "Unknown glTF attribute \'" << name << "\'!" << std::endl;
+                }
+            }
+
+            shape->CalculateBoundingVolume(primitiveAttributes.at(EGXAttribute::Position));
+
+            // Process index data and add vertex attributes to the vertex data arrays
+            switch (prim.mode) {
+                case TINYGLTF_MODE_TRIANGLES:
+                {
+                    triangle_stripper::indices indicesToStrip;
+                    for (const uint16_t i : rawIndices) {
+                        indicesToStrip.push_back(static_cast<size_t>(i));
+                    }
+
+                    triangle_stripper::tri_stripper stripper(indicesToStrip);
+
+                    triangle_stripper::primitive_vector strippedPrimitives;
+                    stripper.Strip(&strippedPrimitives);
+
+                    for (const auto& strip : strippedPrimitives) {
+                        std::shared_ptr<SPrimitive> prim = std::make_shared<SPrimitive>();
+                        prim->mPrimitiveType = EGXPrimitiveType::TriangleStrips;
+
+                        std::vector<uint16_t> strippedIndices;
+                        for (const triangle_stripper::index i : strip.Indices) {
+                            strippedIndices.push_back(static_cast<uint16_t>(i));
+                        }
+
+                        vertexData.BuildConverterPrimitive(primitiveAttributes, strippedIndices, jointIndices, weights, prim);
+                        shape->AddPrimitive(prim);
+                    }
+
+                    break;
+                }
+                // TODO: Add handling for other primitive types?
+                default:
+                {
+                    std::shared_ptr<SPrimitive> prim = std::make_shared<SPrimitive>();
+                    prim->mPrimitiveType = EGXPrimitiveType::TriangleStrips;
+
+                    vertexData.BuildConverterPrimitive(primitiveAttributes, rawIndices, jointIndices, weights, prim);
+                    shape->AddPrimitive(prim);
+
+                    break;
+                }
+            }
+
+            // If there is skinning info, analyze it to see which joint this shape belongs to.
+            uint32_t jointIndex = UINT32_MAX;
+
+            if (jointIndices.size() != 0) {
+                for (uint32_t i = 0; i < jointIndices.size(); i++) {
+                    if (weights[i][0] < 1.0f) {
+                        jointIndex = 0;
+                        break;
+                    }
+                    else {
+                        if (jointIndex != UINT32_MAX) {
+                            if (jointIndex != jointIndices[i][0]) {
+                                jointIndex = 0;
+                                break;
+                            }
+                        }
+                        else {
+                            jointIndex = jointIndices[i][0];
+                        }
+                    }
+                }
+            }
+            // Otherwise, just set its joint index to the root.
+            else {
+                jointIndex = 0;
+            }
+
+            shape->SetJointIndex(jointIndex);
+            mShapes.push_back(shape);
+        }
+    }
+}

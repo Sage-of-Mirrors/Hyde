@@ -1,0 +1,10 @@
+{
+  "name": "hyde",
+  "version-string": "hyde-win",
+  "dependencies": [
+    "zlib",
+    "libpng",
+    "freeglut"
+  ],
+  "builtin-baseline": "e590c2b30c08caf1dd8d612ec602a003f9784b7d"
+}
