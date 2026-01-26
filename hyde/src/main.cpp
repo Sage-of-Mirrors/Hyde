@@ -1,16 +1,19 @@
-#include "j3dconv.hpp"
-#include "object.hpp"
-
+#include <model.h>
 #include <bstream.h>
-#include <tiny_gltf.h>
+#include <ufbx.h>
 
 int main() {
-    tinygltf::Model model;
-    libj3dconv::LoadGltf(&model, "D:\\SZS Tools\\J3DConv\\link.glb");
+    ufbx_load_opts opts = { 0 };
+    ufbx_error error;
 
-    CConverterObject t;
-    t.Load(&model);
+    ufbx_scene* scene = ufbx_load_file("D:\\SZS Tools\\J3DConv\\StackedSpheres.fbx", &opts, &error);
+    if (scene == nullptr)
+    {
+        return -1;
+    }
 
-    bStream::CFileStream f("D:\\SZS Tools\\J3DConv\\test.bmd", bStream::Big, bStream::Out);
-    t.WriteBMD(f);
+    j3d::Model model(scene);
+    model.Export();
+	
+    return 0;
 }
